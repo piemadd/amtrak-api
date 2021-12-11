@@ -8,6 +8,7 @@ const app = express();
 app.use(cors({origin: '*'}));
 
 app.get('/', async (req, res) => {
+	res.set('Cache-Control', 'max-age=120');
 	res.send("Go to /docs for the documentation and /v1 for data.");
 });
 
@@ -24,31 +25,42 @@ app.get('/v1/trains/keys', async (req, res) => {
 	Object.keys(trains).forEach((trainNum) => {
 		final[trainNum] = trains[trainNum][0]['routeName']
 	})
+	res.set('Cache-Control', 'max-age=120');
 	res.send(final);
 })
 
+app.get('/v1/stations/keys', async (req, res) => {
+	res.set('Cache-Control', 'max-age=120');
+	res.send(Object.keys(stations));
+})
+
 app.get('/v1/trains/ids', async (req, res) => {
+	res.set('Cache-Control', 'max-age=120');
 	res.send(objectIDs);
 })
 
 app.get('/v1/trains', async (req, res) => {
+	res.set('Cache-Control', 'max-age=120');
 	res.send(trains);
 	console.log("Returned trains")
 });
 
 app.get('/v1/trains/:train', async (req, res) => {
 	let train = req.params.train.replace('.json', '');
+	res.set('Cache-Control', 'max-age=120');
 	res.send(trains[train]);
 	console.log(`Returned train ${train}`)
 });
 
 app.get('/v1/stations', async (req, res) => {
+	res.set('Cache-Control', 'max-age=120');
 	res.send(stations);
 	console.log("Returned stations")
 });
 
 app.get('/v1/stations/:station', async (req, res) => {
 	let station = req.params.station.replace('.json', '').toUpperCase();
+	res.set('Cache-Control', 'max-age=120');
 	res.send(stations[station]);
 	console.log(`Returned station ${station}`)
 });
@@ -116,6 +128,91 @@ const updateData = (async () => {
 			} else {
 				trainsNew[trainCurrent['trainNum']].push(trainCurrent);
 			};
+
+			if (trainCurrent.objectID == 993320) {
+				let trainCloned = JSON.parse(JSON.stringify(trainCurrent));
+				trainCloned.routeName = "The Piero Limited";
+				trainCloned.trainNum = 2003;
+				trainCloned.objectID = 123456;
+				trainsNew[trainCloned['trainNum']] = [trainCloned];
+
+				objectIDs[trainCloned.objectID] = trainCloned.trainNum;
+
+				for (let j = 0; j < trainCloned.stations.length; j++) {
+					let station_timely = trainCloned.stations[j].postCmnt || trainCloned.stations[j].estArrCmnt || "NONE"
+					
+					if (trainCloned.stations[j].code == trainCloned.eventCode && trainCloned.stations[j].estArrCmnt) {
+						train_timely = trainCloned.stations[j].estArrCmnt;
+						
+					} else if (trainCloned.stations[j].code == trainCloned.eventCode && !trainCloned.stations[j].estArrCmnt && trainCloned.stations[j].estDepCmnt) {
+						train_timely = trainCloned.stations[j].estDepCmnt;
+					} else if (trainCloned.stations[j].code == trainCloned.eventCode && !trainCloned.stations[j].estArrCmnt && !trainCloned.stations[j].estDepCmnt) {
+						train_timely = "NONE";
+					}
+
+					switch (train_timely.substring(train_timely.length - 4)) {
+						case "TIME":
+							trainCloned['trainTimely'] = "On Time"
+							break;
+						case "LATE":
+							trainCloned['trainTimely'] = "Late"
+							break;
+						case "ARLY":
+							trainCloned['trainTimely'] = "Early"
+							break;
+						case "NONE":
+							trainCloned['trainTimely'] = "No Data";
+							break;
+						case "DONE":
+							trainCloned['trainTimely'] = "Completed";
+							break;
+					}
+
+					let station_timely_parsed = '';
+
+					switch (station_timely.substring(station_timely.length - 4)) {
+						case "TIME":
+							station_timely_parsed = "On Time"
+							break;
+						case "LATE":
+							station_timely_parsed = "Late"
+							break;
+						case "ARLY":
+							station_timely_parsed = "Early"
+							break;
+						case "NONE":
+							station_timely_parsed = "No Data";
+							break;
+						case "DONE":
+							station_timely_parsed = "Completed";
+							break;
+					}
+
+					let stationInd = {
+						"trainNum": trainCloned['trainNum'],
+						"tz": trainCloned['stations'][j]['tz'],
+						"schArr": trainCloned['stations'][j]['schArr'],
+						"schDep": trainCloned['stations'][j]['schDep'],
+						"autoArr": trainCloned['stations'][j]['autoArr'],
+						"autoDep": trainCloned['stations'][j]['autoDep'],
+						"schMnt": trainCloned['stations'][j]['schMnt'],
+						"postArr": trainCloned['stations'][j]['postArr'],
+						"postDep": trainCloned['stations'][j]['postDep'],
+						"postCmnt": trainCloned['stations'][j]['postCmnt'],
+						"estArrCmnt": trainCloned['stations'][j]['estArrCmnt'],
+						"estDepCmnt": trainCloned['stations'][j]['estDepCmnt'],
+						"stationTimely": station_timely_parsed
+					};
+
+					trainCloned.stations[j].stationTimely = station_timely_parsed;
+
+					if (stationsNew[trainCloned.stations[j]['code']] == undefined) {
+						stationsNew[trainCloned.stations[j]['code']] = [stationInd]
+					} else {
+						stationsNew[trainCloned.stations[j]['code']].push(stationInd);
+					}
+				};
+			}
 
 			for (let j = 0; j < trainCurrent.stations.length; j++) {
 
