@@ -1,0 +1,17 @@
+[
+  {
+    "routeName": "The Piero Limited",
+    "trainNum": 2003,
+    "objectID": 123456,
+    "destCode": "NOL",
+    "origCode": "NYP",
+    "aliases": [],
+    "stations": [
+      {
+        "code": "NYP",
+        "name": "New York Penn"
+      }
+    ],
+    "trainTimely": "On Time"
+  }
+]

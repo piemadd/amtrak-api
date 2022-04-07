@@ -1,0 +1,58 @@
+{
+    "routeName": "Test Train",
+    "trainNum": 9999,
+    "coordinates": [
+        100,
+        -100
+    ],
+    "objectID": 123456,
+    "lat": 100,
+    "lon": -100,
+    "heading": "N",
+    "velocity": 100,
+    "lastValTS": "2000-01-01T00:00:00.000Z",
+    "trainTimeZone": "EST",
+    "trainState": "Active",
+    "statusMsg": " ",
+    "serviceDisruption": false,
+    "eventCode": "ATL",
+    "destCode": "ATL",
+    "origCode": "CHI",
+    "originTZ": "CST",
+    "origSchDep": "2000-01-01T00:00:00.000Z",
+    "aliases": [],
+    "updatedAt": "2000-01-01T00:00:00.000Z",
+    "stations": [
+        {
+            "trainNum": 9999,
+            "code": "CHI",
+            "tz": "CST",
+            "bus": false,
+            "schDep": "2000-01-01T00:00:00.000Z",
+            "autoArr": false,
+            "autoDep": false,
+            "postArr": "2000-01-01T00:00:00.000Z",
+            "postDep": "2000-01-01T00:00:00.000Z",
+            "postCmnt": "ON TIME",
+            "stationName": "Chicago Union",
+            "stationTimely": "On Time"
+        },
+        {
+            "trainNum": 9999,
+            "code": "ATL",
+            "tz": "EST",
+            "bus": false,
+            "schArr": "2000-01-01T00:00:00.000Z",
+            "schDep": "2000-01-01T00:00:00.000Z",
+            "autoArr": true,
+            "autoDep": true,
+            "estArr": "2000-01-01T00:00:00.000Z",
+            "estDep": "2000-01-01T00:00:00.000Z",
+            "estArrCmnt": "00 HR 00 MI LATE",
+            "stationName": "Atlanta Peachtree",
+            "stationTimely": "Early"
+        }
+    ],
+    "eventName": "Atlanta Peachtree",
+    "trainTimely": "Early"
+}

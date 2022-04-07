@@ -1,11 +1,23 @@
+// all of this code is terrible. do not try to replicate for your own sanity
+
 const express = require('express');
 const amtrak = require('amtrak');
 const cors = require('cors');
 const fetch = require('node-fetch');
+const stationsList = require('./stations');
+const fs = require('fs');
+const { toXML } = require("jstoxml");
 
 const app = express();
 
+const embedTemplate = fs.readFileSync('./embed.html', {encoding:'utf8', flag:'r'});
+const testTrain = JSON.parse(fs.readFileSync('./testTrain.json', {encoding:'utf8', flag:'r'}));
+
 app.use(cors({origin: '*'}));
+
+app.get('/assets', async (req, res) => {
+    res.send('https://www.amtrak.com/content/dam/projects/dotcom/english/public/documents/corporate/businessplanning/Amtrak-Asset-Line-Plans-FY21-25.pdf')
+})
 
 app.get('/', async (req, res) => {
 	res.set('Cache-Control', 'max-age=120');
@@ -31,12 +43,17 @@ app.get('/v1/trains/keys', async (req, res) => {
 
 app.get('/v1/stations/keys', async (req, res) => {
 	res.set('Cache-Control', 'max-age=120');
-	res.send(Object.keys(stations));
+	res.send(stationsList);
 })
 
 app.get('/v1/trains/ids', async (req, res) => {
 	res.set('Cache-Control', 'max-age=120');
 	res.send(objectIDs);
+})
+
+app.get('/v1/trains/dates', async (req, res) => {
+	res.set('Cache-Control', 'max-age=120');
+	res.send(departureDates);
 })
 
 app.get('/v1/trains', async (req, res) => {
@@ -47,8 +64,14 @@ app.get('/v1/trains', async (req, res) => {
 
 app.get('/v1/trains/:train', async (req, res) => {
 	let train = req.params.train.replace('.json', '');
-	res.set('Cache-Control', 'max-age=120');
-	res.send(trains[train]);
+
+    res.set('Cache-Control', 'max-age=120');
+    
+    if (parseInt(train) == 9999 && !trains[2003]) {
+        res.send([testTrain])
+    } else {
+        res.send(trains[train]);
+    }
 	console.log(`Returned train ${train}`)
 });
 
@@ -65,6 +88,53 @@ app.get('/v1/stations/:station', async (req, res) => {
 	console.log(`Returned station ${station}`)
 });
 
+app.get('/v2/oembed', async (req, res) => {
+    if (!req.query.url) {
+        res.status(400).send('Bad Request')
+    } else if (req.query.url == '{amtrakerUrl}') {
+        res.send("read the docs please lol")
+    } else {
+        let requestedURL = req.query.url;
+        let trainProps = requestedURL.split('/trains/')[1].split('&')[0].split('?d=');
+        
+        let objectID = requestedURL.split('view.html?train=')[1];
+        let trainNum = trainProps[0];
+        let trainDate = trainProps[1];
+        let currentTrain = {};
+        
+        if (trainNum == 9999) {
+            currentTrain = testTrain;
+        } else {
+            currentTrain = trains[trainNum][0]
+        }
+        
+        let response = {
+        	"version": "1.0",
+        	"type": "rich",
+            "html": embedTemplate.replace("train_number_here", trainNum).replace("train_date_here", trainDate),
+        	"width": 420,
+        	"height": 660,
+        	"title": `Amtraker: ${currentTrain.routeName}`,
+        	"provider_name": "Amtraker",
+        	"provider_url": "https://amtraker.com/"
+        }
+    	res.set('Cache-Control', 'max-age=120');
+        if (req.query.xml == 'true') {
+            res.set('Content-Type', 'text/xml');
+            res.send(toXML({'oembed': response}));    
+        } else {
+            res.send(response);
+        }
+    	console.log(`Returned embed for train ${trainNum}`);
+    }
+})
+
+app.get('/v2/isDataFeedStale', async (req, res) => {
+	res.set('Cache-Control', 'max-age=120');
+	res.send(isDataFeedStale);
+	console.log("Returned data feed status")
+});
+
 app.get('/update', async (req, res) => {
 	if (req.headers['updatetoken'] == process.env['updateToken']) {
 		console.log("Updating!")
@@ -79,21 +149,29 @@ app.get('/update', async (req, res) => {
 // variables the API pulls from;
 var trains = {};
 var stations = {};
+var departureDates = {};
+var isDataFeedStale = false;
 
 // variables the update script writes to and then copies to the above variables
 var trainsNew = {};
 var stationsNew = {};
 var objectIDs = {};
+var departureDatesNew = {};
+var timesSinceLastUpdated = [];
 
 const updateData = (async () => {
 	console.log("updating trains")
+
+    const now = new Date().getTime();
+    
 	amtrak.fetchTrainData().then((trainsTemp) => {
 
 		for (let i = 0; i < trainsTemp.length; i++) {
 
+            timesSinceLastUpdated.push(now - trainsTemp[i].updatedAt.getTime())
+            
 			let train_timely = "";
 			let trainCurrent = trainsTemp[i];
-			
 
 			if (trainCurrent.statusMsg == null || trainCurrent.stations == null || (trainCurrent.trainState == 'Completed' && trainCurrent.origSchDep.valueOf() + 259200 < new Date().valueOf())) {
 				continue;
@@ -112,107 +190,114 @@ const updateData = (async () => {
 			}
 
 			objectIDs[trainCurrent.objectID] = trainCurrent.trainNum;
+            
+            if (!departureDatesNew[trainCurrent.trainNum]) {
+                departureDatesNew[trainCurrent.trainNum] = [];
+            }
 
-			/*
-			if (trainCurrent.objectID == 860914) {
-				trainCurrent.routeName = 'Horny MF Train'
-			}
+            departureDatesNew[trainCurrent.trainNum].push(trainCurrent.origSchDep);
 
-			if (trainCurrent.objectID == 863285) {
-				trainCurrent.routeName = 'Horny MF Train 2.0'
-			}
-			*/
+            trainCurrent.eventName = stationsList[trainCurrent.eventCode];
+            
+			if (new Date(trainCurrent.origSchDep).getDate() == 0 && trainCurrent.trainNum == 50) {
+                let trainCloned = JSON.parse(JSON.stringify(trainCurrent));
+                trainCloned.routeName = "Piero Limited";
+                trainCloned.trainNum = 2003;
+                trainCloned.objectID = 123456;
+                trainsNew[trainCloned['trainNum']] = [trainCloned];
+
+                if (!departureDatesNew[trainCloned.trainNum]) {
+                    departureDatesNew[trainCloned.trainNum] = [];
+                }
+    
+                departureDatesNew[trainCloned.trainNum].push(trainCloned.origSchDep);
+    
+                objectIDs[trainCloned.objectID] = trainCloned.trainNum;
+    
+                for (let j = 0; j < trainCloned.stations.length; j++) {
+                    let station_timely = trainCloned.stations[j].postCmnt || trainCloned.stations[j].estArrCmnt || "NONE"
+                    
+                    if (trainCloned.stations[j].code == trainCloned.eventCode && trainCloned.stations[j].estArrCmnt) {
+                        train_timely = trainCloned.stations[j].estArrCmnt;
+                        
+                    } else if (trainCloned.stations[j].code == trainCloned.eventCode && !trainCloned.stations[j].estArrCmnt && trainCloned.stations[j].estDepCmnt) {
+                        train_timely = trainCloned.stations[j].estDepCmnt;
+                    } else if (trainCloned.stations[j].code == trainCloned.eventCode && !trainCloned.stations[j].estArrCmnt && !trainCloned.stations[j].estDepCmnt) {
+                        train_timely = "NONE";
+                    }
+    
+                    switch (train_timely.substring(train_timely.length - 4)) {
+                        case "TIME":
+                            trainCloned['trainTimely'] = "On Time"
+                            break;
+                        case "LATE":
+                            trainCloned['trainTimely'] = "Late"
+                            break;
+                        case "ARLY":
+                            trainCloned['trainTimely'] = "Early"
+                            break;
+                        case "NONE":
+                            trainCloned['trainTimely'] = "No Data";
+                            break;
+                        case "DONE":
+                            trainCloned['trainTimely'] = "Completed";
+                            break;
+                    }
+    
+                    let station_timely_parsed = '';
+    
+                    switch (station_timely.substring(station_timely.length - 4)) {
+                        case "TIME":
+                            station_timely_parsed = "On Time"
+                            break;
+                        case "LATE":
+                            station_timely_parsed = "Late"
+                            break;
+                        case "ARLY":
+                            station_timely_parsed = "Early"
+                            break;
+                        case "NONE":
+                            station_timely_parsed = "No Data";
+                            break;
+                        case "DONE":
+                            station_timely_parsed = "Completed";
+                            break;
+                    }
+                    
+                    trainCloned['stations'][j]['stationName'] = stationsList[trainCloned.stations[j]['code']];
+                    
+                    let stationInd = {
+                        "stationName": trainCloned['stations'][j]['stationName'],
+                        "trainNum": trainCloned['trainNum'],
+                        "tz": trainCloned['stations'][j]['tz'],
+                        "schArr": trainCloned['stations'][j]['schArr'],
+                        "schDep": trainCloned['stations'][j]['schDep'],
+                        "autoArr": trainCloned['stations'][j]['autoArr'],
+                        "autoDep": trainCloned['stations'][j]['autoDep'],
+                        "schMnt": trainCloned['stations'][j]['schMnt'],
+                        "postArr": trainCloned['stations'][j]['postArr'],
+                        "postDep": trainCloned['stations'][j]['postDep'],
+                        "postCmnt": trainCloned['stations'][j]['postCmnt'],
+                        "estArrCmnt": trainCloned['stations'][j]['estArrCmnt'],
+                        "estDepCmnt": trainCloned['stations'][j]['estDepCmnt'],
+                        "stationTimely": station_timely_parsed
+                    };
+    
+                    trainCloned.stations[j].stationTimely = station_timely_parsed;
+    
+                    if (stationsNew[trainCloned.stations[j]['code']] == undefined) {
+                        stationsNew[trainCloned.stations[j]['code']] = [stationInd]
+                    } else {
+                        stationsNew[trainCloned.stations[j]['code']].push(stationInd);
+                    }
+                };
+            }
 
 			if (trainsNew[trainCurrent['trainNum']] == undefined) {
 				trainsNew[trainCurrent['trainNum']] = [trainCurrent];
 			} else {
 				trainsNew[trainCurrent['trainNum']].push(trainCurrent);
 			};
-
-			if (trainCurrent.objectID == 993320) {
-				let trainCloned = JSON.parse(JSON.stringify(trainCurrent));
-				trainCloned.routeName = "The Piero Limited";
-				trainCloned.trainNum = 2003;
-				trainCloned.objectID = 123456;
-				trainsNew[trainCloned['trainNum']] = [trainCloned];
-
-				objectIDs[trainCloned.objectID] = trainCloned.trainNum;
-
-				for (let j = 0; j < trainCloned.stations.length; j++) {
-					let station_timely = trainCloned.stations[j].postCmnt || trainCloned.stations[j].estArrCmnt || "NONE"
-					
-					if (trainCloned.stations[j].code == trainCloned.eventCode && trainCloned.stations[j].estArrCmnt) {
-						train_timely = trainCloned.stations[j].estArrCmnt;
-						
-					} else if (trainCloned.stations[j].code == trainCloned.eventCode && !trainCloned.stations[j].estArrCmnt && trainCloned.stations[j].estDepCmnt) {
-						train_timely = trainCloned.stations[j].estDepCmnt;
-					} else if (trainCloned.stations[j].code == trainCloned.eventCode && !trainCloned.stations[j].estArrCmnt && !trainCloned.stations[j].estDepCmnt) {
-						train_timely = "NONE";
-					}
-
-					switch (train_timely.substring(train_timely.length - 4)) {
-						case "TIME":
-							trainCloned['trainTimely'] = "On Time"
-							break;
-						case "LATE":
-							trainCloned['trainTimely'] = "Late"
-							break;
-						case "ARLY":
-							trainCloned['trainTimely'] = "Early"
-							break;
-						case "NONE":
-							trainCloned['trainTimely'] = "No Data";
-							break;
-						case "DONE":
-							trainCloned['trainTimely'] = "Completed";
-							break;
-					}
-
-					let station_timely_parsed = '';
-
-					switch (station_timely.substring(station_timely.length - 4)) {
-						case "TIME":
-							station_timely_parsed = "On Time"
-							break;
-						case "LATE":
-							station_timely_parsed = "Late"
-							break;
-						case "ARLY":
-							station_timely_parsed = "Early"
-							break;
-						case "NONE":
-							station_timely_parsed = "No Data";
-							break;
-						case "DONE":
-							station_timely_parsed = "Completed";
-							break;
-					}
-
-					let stationInd = {
-						"trainNum": trainCloned['trainNum'],
-						"tz": trainCloned['stations'][j]['tz'],
-						"schArr": trainCloned['stations'][j]['schArr'],
-						"schDep": trainCloned['stations'][j]['schDep'],
-						"autoArr": trainCloned['stations'][j]['autoArr'],
-						"autoDep": trainCloned['stations'][j]['autoDep'],
-						"schMnt": trainCloned['stations'][j]['schMnt'],
-						"postArr": trainCloned['stations'][j]['postArr'],
-						"postDep": trainCloned['stations'][j]['postDep'],
-						"postCmnt": trainCloned['stations'][j]['postCmnt'],
-						"estArrCmnt": trainCloned['stations'][j]['estArrCmnt'],
-						"estDepCmnt": trainCloned['stations'][j]['estDepCmnt'],
-						"stationTimely": station_timely_parsed
-					};
-
-					trainCloned.stations[j].stationTimely = station_timely_parsed;
-
-					if (stationsNew[trainCloned.stations[j]['code']] == undefined) {
-						stationsNew[trainCloned.stations[j]['code']] = [stationInd]
-					} else {
-						stationsNew[trainCloned.stations[j]['code']].push(stationInd);
-					}
-				};
-			}
 
 			for (let j = 0; j < trainCurrent.stations.length; j++) {
 
@@ -265,6 +350,8 @@ const updateData = (async () => {
 						break;
 				}
 
+                trainCurrent['stations'][j]['stationName'] = stationsList[trainCurrent.stations[j]['code']];
+
 				let stationInd = {
 					"trainNum": trainCurrent['trainNum'],
 					"tz": trainCurrent['stations'][j]['tz'],
@@ -278,7 +365,8 @@ const updateData = (async () => {
 					"postCmnt": trainCurrent['stations'][j]['postCmnt'],
 					"estArrCmnt": trainCurrent['stations'][j]['estArrCmnt'],
 					"estDepCmnt": trainCurrent['stations'][j]['estDepCmnt'],
-					"stationTimely": station_timely_parsed
+					"stationTimely": station_timely_parsed,
+                    "stationName": stationsList[trainCurrent.stations[j]['code']]
 				};
 
 				trainCurrent.stations[j].stationTimely = station_timely_parsed;
@@ -289,54 +377,34 @@ const updateData = (async () => {
 					stationsNew[trainCurrent.stations[j]['code']].push(stationInd);
 				}
 			};
-
 		};
 
+        let timesTotalTemp = 0;
+        for (let i = 0; i < timesSinceLastUpdated.length; i++) {
+            timesTotalTemp += timesSinceLastUpdated[i];
+        }
+    
+        if (timesTotalTemp / timesSinceLastUpdated.length > 7200000) {
+            isDataFeedStale = true;
+        } else {
+            isDataFeedStale = false;
+        }
+
+        //trainsNew['9999'] = [testTrain];
+        objectIDs['123456'] = '9999';
+
+        departureDatesNew['9999'] = ['2000-01-01T00:00:00.000Z'];
+        
 		trains = trainsNew;
 		stations = stationsNew;
+        departureDates = departureDatesNew;
 
 		trainsNew = {};
 		stationsNew = {};
+        departureDatesNew = {};
+        timesSinceLastUpdated = [];
 
 		console.log("updated")
-		//idk lol
-		fetch('https://api.cloudflare.com/client/v4/zones?name=amtrak.cc&status=active', {
-			headers: {
-				'X-Auth-Email': 'piero@piemadd.com',
-				'X-Auth-Key': process.env.cloudflare,
-				'Content-Type': 'application/json'
-			}
-		})
-		.then(async (res) => {
-			let domainID = await res.json();
-			fetch(`https://api.cloudflare.com/client/v4/zones/${domainID.result[0]['id']}/dns_records?type=CNAME&name=api.amtrak.cc`, {
-				headers: {
-					'X-Auth-Email': 'piero@piemadd.com',
-					'X-Auth-Key': process.env.cloudflare,
-					'Content-Type': 'application/json'
-				}
-			}).then(async (res) => {
-				let result = await res.json()
-				let recordID = result.result[0]['zone_id']
-
-				fetch(`https://api.cloudflare.com/client/v4/zones/${recordID}/purge_cache`, {
-					method: 'POST',
-					headers: {
-						'X-Auth-Email': 'piero@piemadd.com',
-						'X-Auth-Key': process.env.cloudflare,
-						'Content-Type': 'application/json'
-					},
-					body: JSON.stringify({"purge_everything":true})
-				})
-				.then(async (res) => {
-					if (await res.status) {
-						console.log("Cache purged")
-					} else {
-						console.log("ruh roh raggy, something fucked up with the cache")
-					}
-				})
-			});
-		})		
 	});
 
 });
