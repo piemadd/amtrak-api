@@ -8,6 +8,8 @@ const stationsList = require('./stations');
 const fs = require('fs');
 const { toXML } = require("jstoxml");
 
+const { names } = require('./trainNames');
+
 const app = express();
 
 const embedTemplate = fs.readFileSync('./embed.html', {encoding:'utf8', flag:'r'});
@@ -129,9 +131,12 @@ app.get('/v2/oembed', async (req, res) => {
     }
 })
 
-app.get('/v2/isDataFeedStale', async (req, res) => {
+app.get('/v2/dataFeedState', async (req, res) => {
 	res.set('Cache-Control', 'max-age=120');
-	res.send(isDataFeedStale);
+	res.send({
+        timeSinceLastUpdate: timeSinceLastUpdate,
+        isStale: dataFeedIsStale
+    });
 	console.log("Returned data feed status")
 });
 
@@ -150,7 +155,8 @@ app.get('/update', async (req, res) => {
 var trains = {};
 var stations = {};
 var departureDates = {};
-var isDataFeedStale = false;
+var timeSinceLastUpdate = 0;
+var dataFeedIsStale = false;
 
 // variables the update script writes to and then copies to the above variables
 var trainsNew = {};
@@ -166,9 +172,13 @@ const updateData = (async () => {
     
 	amtrak.fetchTrainData().then((trainsTemp) => {
 
+        console.log(trainsTemp.length)
+
 		for (let i = 0; i < trainsTemp.length; i++) {
 
-            timesSinceLastUpdated.push(now - trainsTemp[i].updatedAt.getTime())
+            if(trainsTemp[i].destCode != trainsTemp[i].eventCode) {
+                timesSinceLastUpdated.push(now - trainsTemp[i].updatedAt.getTime())   
+            }
             
 			let train_timely = "";
 			let trainCurrent = trainsTemp[i];
@@ -177,6 +187,8 @@ const updateData = (async () => {
 				continue;
 			}
 
+            trainCurrent.routeName = names[trainCurrent.trainNum] ? names[trainCurrent.trainNum] : trainCurrent.routeName
+            
 			if (new Date(trainCurrent.origSchDep) > new Date()) {
 				trainCurrent.trainState = 'Predeparture';
 			}
@@ -379,16 +391,20 @@ const updateData = (async () => {
 			};
 		};
 
+        console.log("start counting")
+
         let timesTotalTemp = 0;
         for (let i = 0; i < timesSinceLastUpdated.length; i++) {
             timesTotalTemp += timesSinceLastUpdated[i];
         }
+
+        console.log('end counting')
     
-        if (timesTotalTemp / timesSinceLastUpdated.length > 7200000) {
-            isDataFeedStale = true;
-        } else {
-            isDataFeedStale = false;
-        }
+        timeSinceLastUpdate = parseInt(timesTotalTemp / timesSinceLastUpdated.length);
+
+        dataFeedIsStale = timeSinceLastUpdate > 7200000;
+
+        console.log('timings done')
 
         //trainsNew['9999'] = [testTrain];
         objectIDs['123456'] = '9999';

@@ -11,7 +11,7 @@
   "license": "ISC",
   "dependencies": {
     "@replit/database": "^2.0.1",
-    "amtrak": "^2.8.4",
+    "amtrak": "^2.8.7",
     "cors": "^2.8.5",
     "express": "^4.17.2",
     "jstoxml": "^2.2.7",
