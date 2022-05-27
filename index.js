@@ -44,7 +44,7 @@ app.get('/v1/trains/keys', async (req, res) => {
 })
 
 app.get('/v1/stations/keys', async (req, res) => {
-	res.set('Cache-Control', 'max-age=120');
+	res.set('Cache-Control', 'maxhttp://api.amtraker.comhttp://api.amtraker.comhttp://api.amtraker.com-age=120');
 	res.send(stationsList);
 })
 
