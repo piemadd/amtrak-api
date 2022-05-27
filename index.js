@@ -427,6 +427,8 @@ const updateData = (async () => {
 
 updateData();
 
-app.listen(process.env.port || 8080, () => {
-	console.log('server started');
+const port = process.env.PORT ? process.env.PORT | 8080;
+
+app.listen(port, () => {
+	console.log('server started on port: ' + port);
 });
