@@ -1,4 +1,4 @@
-exports.data = {
+exports.names = {
 	"1": "Sunset Limited",
 	"2": "Sunset Limited",
 	"3": "Southwest Chief",
